@@ -1,0 +1,8 @@
+flask
+boto3
+numpy
+opencv-python-headless
+face_recognition
+fer
+tensorflow
+mtcnn

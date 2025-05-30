@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Face + Emotion Detection</title>
+</head>
+<body>
+    <h2>Process Video</h2>
+    <form id="process-form">
+        <label>Input S3 Bucket:</label><br/>
+        <input type="text" id="input_bucket" value="my-emotion-model-bucket" required /><br/>
+
+        <label>Input S3 Key:</label><br/>
+        <input type="text" id="input_key" value="input/7698902-sd_960_506_25fps.mp4" required /><br/>
+
+        <label>Output S3 Bucket:</label><br/>
+        <input type="text" id="output_bucket" value="my-emotion-model-bucket" required /><br/>
+
+        <label>Output S3 Key:</label><br/>
+        <input type="text" id="output_key" value="output/output_with_emotions.mp4" required /><br/><br/>
+
+        <button type="submit">Process Video</button>
+    </form>
+
+    <div id="result" style="margin-top:20px;"></div>
+
+    <script>
+        document.getElementById('process-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const input_bucket = document.getElementById('input_bucket').value;
+            const input_key = document.getElementById('input_key').value;
+            const output_bucket = document.getElementById('output_bucket').value;
+            const output_key = document.getElementById('output_key').value;
+
+            const formData = new FormData();
+            formData.append('input_bucket', input_bucket);
+            formData.append('input_key', input_key);
+            formData.append('output_bucket', output_bucket);
+            formData.append('output_key', output_key);
+
+            const response = await fetch('/process', {
+                method: 'POST',
+                body: formData
+            });
+
+            const resultDiv = document.getElementById('result');
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                resultDiv.innerHTML = `<p>Processing complete! <a href="${result.output_url}" target="_blank">View Output Video</a></p>`;
+            } else {
+                resultDiv.innerHTML = `<p style="color:red;">Error: ${result.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>
