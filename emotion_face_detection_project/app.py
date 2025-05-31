@@ -2,11 +2,11 @@ import os
 import uuid
 import boto3
 import datetime
+import logging
+from functools import wraps
 from flask import Flask, request, jsonify, render_template
 from werkzeug.utils import secure_filename
 from your_script import process_video
-import logging
-from functools import wraps
 
 # Configure logging
 logging.basicConfig(
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configuration (consider moving to config.py or environment variables)
+# Configuration
 class Config:
     AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
     DYNAMODB_TABLE = os.getenv('DYNAMODB_TABLE', 'KnownFaces')
@@ -29,17 +29,7 @@ class Config:
 
 app.config.from_object(Config)
 
-# Initialize AWS clients
-try:
-    s3 = boto3.client('s3', region_name=Config.AWS_REGION)
-    dynamodb = boto3.resource('dynamodb', region_name=Config.AWS_REGION)
-    table = dynamodb.Table(Config.DYNAMODB_TABLE)
-    logger.info("AWS clients initialized successfully")
-except Exception as e:
-    logger.error(f"AWS client initialization failed: {e}")
-    raise
-
-# Decorator for error handling
+# Error handler decorator
 def handle_errors(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -49,6 +39,16 @@ def handle_errors(f):
             logger.error(f"Error in {f.__name__}: {str(e)}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     return wrapper
+
+# Initialize AWS clients
+try:
+    s3 = boto3.client('s3', region_name=Config.AWS_REGION)
+    dynamodb = boto3.resource('dynamodb', region_name=Config.AWS_REGION)
+    table = dynamodb.Table(Config.DYNAMODB_TABLE)
+    logger.info("AWS clients initialized successfully")
+except Exception as e:
+    logger.error(f"AWS client initialization failed: {e}")
+    raise
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -73,11 +73,11 @@ def upload_video():
     if not allowed_file(file.filename):
         return jsonify({'error': f'Only {", ".join(Config.ALLOWED_EXTENSIONS)} files allowed'}), 400
 
-    # Generate S3 key for input folder
+    # Generate S3 key
     filename = f"{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}"
     s3_key = f"{Config.INPUT_PREFIX}{filename}"
 
-    # Upload to S3 input folder
+    # Upload to S3
     s3.upload_fileobj(
         file,
         Config.S3_BUCKET,
@@ -110,7 +110,6 @@ def process_video_endpoint():
     if not data['input_key'].startswith(Config.INPUT_PREFIX):
         return jsonify({'error': 'Invalid input key format'}), 400
 
-    # Process video
     result = process_video(
         input_bucket=Config.S3_BUCKET,
         input_key=data['input_key'],
@@ -127,13 +126,13 @@ def process_video_endpoint():
 @app.route('/videos', methods=['GET'])
 @handle_errors
 def list_processed_videos():
-    """List processed videos from output folder with pagination"""
+    """List processed videos with pagination"""
     continuation_token = request.args.get('continuation_token')
     
     list_args = {
         'Bucket': Config.S3_BUCKET,
         'Prefix': Config.OUTPUT_PREFIX,
-        'MaxKeys': 50  # Limit number of results per page
+        'MaxKeys': 50
     }
     
     if continuation_token:
@@ -168,7 +167,7 @@ def download_file(s3_key):
             'Bucket': Config.S3_BUCKET,
             'Key': s3_key
         },
-        ExpiresIn=3600  # 1 hour expiration
+        ExpiresIn=3600
     )
     return jsonify({'url': url})
 
