@@ -26,7 +26,24 @@ def get_aws_clients(region_name='us-east-1'):
     except Exception as e:
         logger.error(f"AWS client initialization failed: {e}")
         raise
-
+# Add this function to your_script.py
+def update_processing_status(table_name, s3_key, status, region_name='us-east-1'):
+    dynamodb = boto3.resource('dynamodb', region_name=region_name)
+    table = dynamodb.Table(table_name)
+    
+    try:
+        table.update_item(
+            Key={'s3_key': s3_key},
+            UpdateExpression='SET processed = :val, processed_time = :time',
+            ExpressionAttributeValues={
+                ':val': status,
+                ':time': str(datetime.datetime.now())
+            }
+        )
+        return True
+    except Exception as e:
+        logging.error(f"Status update failed: {e}")
+        return False
 def load_known_faces_from_dynamodb(table_name="KnownFaces", region_name='us-east-1'):
     """Load face encodings from DynamoDB with retry logic"""
     clients = get_aws_clients(region_name)
