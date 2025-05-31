@@ -1,12 +1,16 @@
 import os
 import uuid
 import boto3
+import base64
 import datetime
 import logging
+import numpy as np
+import face_recognition
 from functools import wraps
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from your_script import process_video
+from your_script import process_video  # ensure it supports local path inputs
 
 # Configure logging
 logging.basicConfig(
@@ -16,6 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app)  # Allow cross-origin frontend access
 
 # Configuration
 class Config:
@@ -51,9 +56,7 @@ except Exception as e:
     raise
 
 def allowed_file(filename):
-    """Check if file extension is allowed"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
 
 @app.route('/')
 def index():
@@ -62,22 +65,19 @@ def index():
 @app.route('/upload', methods=['POST'])
 @handle_errors
 def upload_video():
-    """Handle video uploads to input folder"""
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
-        
+
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
-        
+
     if not allowed_file(file.filename):
         return jsonify({'error': f'Only {", ".join(Config.ALLOWED_EXTENSIONS)} files allowed'}), 400
 
-    # Generate S3 key
     filename = f"{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}"
     s3_key = f"{Config.INPUT_PREFIX}{filename}"
 
-    # Upload to S3
     s3.upload_fileobj(
         file,
         Config.S3_BUCKET,
@@ -102,7 +102,6 @@ def upload_video():
 @app.route('/process', methods=['POST'])
 @handle_errors
 def process_video_endpoint():
-    """Trigger video processing"""
     data = request.get_json()
     if not data or 'input_key' not in data:
         return jsonify({'error': 'input_key is required'}), 400
@@ -120,47 +119,45 @@ def process_video_endpoint():
 
     if result.get('status') == 'error':
         return jsonify(result), 400
-        
+
     return jsonify(result)
 
 @app.route('/videos', methods=['GET'])
 @handle_errors
 def list_processed_videos():
-    """List processed videos with pagination"""
     continuation_token = request.args.get('continuation_token')
-    
+
     list_args = {
         'Bucket': Config.S3_BUCKET,
         'Prefix': Config.OUTPUT_PREFIX,
         'MaxKeys': 50
     }
-    
+
     if continuation_token:
         list_args['ContinuationToken'] = continuation_token
 
     response = s3.list_objects_v2(**list_args)
-    
+
     videos = [{
         'key': obj['Key'],
         'size': obj['Size'],
         'last_modified': obj['LastModified'].isoformat(),
         'url': f"/download/{obj['Key']}"
     } for obj in response.get('Contents', [])]
-    
+
     result = {
         'videos': videos,
         'count': len(videos)
     }
-    
+
     if 'NextContinuationToken' in response:
         result['continuation_token'] = response['NextContinuationToken']
-    
+
     return jsonify(result)
 
 @app.route('/download/<path:s3_key>', methods=['GET'])
 @handle_errors
 def download_file(s3_key):
-    """Generate presigned URL for download"""
     url = s3.generate_presigned_url(
         'get_object',
         Params={
@@ -173,11 +170,67 @@ def download_file(s3_key):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.datetime.now().isoformat(),
         'aws_region': Config.AWS_REGION
+    })
+
+@app.route('/admin/add-face', methods=['POST'])
+@handle_errors
+def add_face():
+    name = request.form.get('name')
+    file = request.files.get('image')
+
+    if not name or not file:
+        return jsonify({'error': 'Both name and image are required'}), 400
+
+    image = face_recognition.load_image_file(file)
+    encodings = face_recognition.face_encodings(image)
+
+    if not encodings:
+        return jsonify({'error': 'No face found in the image'}), 400
+
+    face_encoding = encodings[0]
+    face_vector = base64.b64encode(face_encoding.tobytes()).decode()
+
+    table.put_item(Item={
+        'name': name,
+        'embedding': face_vector,
+        'registered_at': datetime.datetime.utcnow().isoformat()
+    })
+
+    return jsonify({'status': 'success', 'message': f'{name} registered'})
+
+@app.route('/process-video', methods=['POST'])
+@handle_errors
+def process_uploaded_video():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    temp_path = f"/tmp/{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+    file.save(temp_path)
+
+    output_path = temp_path.replace('.', '_processed.')
+
+    result = process_video(
+        input_path=temp_path,
+        output_path=output_path,
+        aws_region=Config.AWS_REGION,
+        dynamodb_table=table
+    )
+
+    if result.get('status') == 'error':
+        return jsonify(result), 400
+
+    return jsonify({
+        'status': 'success',
+        'message': 'Video processed',
+        'output_path': output_path
     })
 
 if __name__ == '__main__':
