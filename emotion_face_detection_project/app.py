@@ -14,7 +14,7 @@ def process():
     input_key = data.get('input_key')
     output_bucket = data.get('output_bucket')
     output_key = data.get('output_key')
-    aws_region = data.get('aws_region', 'us-east-1')
+    aws_region = data.get('us-east-1')
 
     if not all([input_bucket, input_key, output_bucket, output_key]):
         return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
