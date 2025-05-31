@@ -5,95 +5,173 @@ import boto3
 import numpy as np
 import face_recognition
 from fer import FER
+from datetime import datetime
+import logging
 
-# Optional speed optimization
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Optional optimizations
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
 cv2.setUseOptimized(True)
 cv2.setNumThreads(4)
 
-def load_known_faces_from_dynamodb(table_name="KnownFaces"):
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(table_name)
+def get_aws_clients(region_name='us-east-1'):
+    """Initialize AWS clients with error handling"""
+    try:
+        return {
+            's3': boto3.client('s3', region_name=region_name),
+            'dynamodb': boto3.resource('dynamodb', region_name=region_name)
+        }
+    except Exception as e:
+        logger.error(f"AWS client initialization failed: {e}")
+        raise
 
+def load_known_faces_from_dynamodb(table_name="KnownFaces", region_name='us-east-1'):
+    """Load face encodings from DynamoDB with retry logic"""
+    clients = get_aws_clients(region_name)
+    table = clients['dynamodb'].Table(table_name)
+    
+    known_data = {'names': [], 'encodings': []}
     try:
         response = table.scan(ProjectionExpression="person_id,embedding")
-        items = response.get('Items', [])
-
-        known_names = []
-        known_encodings = []
-        for item in items:
-            name = item['person_id']
-            embedding = np.array(ast.literal_eval(item['embedding']), dtype=np.float32)
-            known_names.append(name)
-            known_encodings.append(embedding)
-
-        return known_names, known_encodings
+        for item in response.get('Items', []):
+            try:
+                known_data['names'].append(item['person_id'])
+                known_data['encodings'].append(np.array(ast.literal_eval(item['embedding']), dtype=np.float32))
+            except (ValueError, KeyError) as e:
+                logger.warning(f"Invalid face data for {item.get('person_id')}: {e}")
+        
+        if not known_data['encodings']:
+            logger.warning("No valid face encodings found in DynamoDB")
+        
+        return known_data
     except Exception as e:
-        print(f"Failed to load from DynamoDB: {e}")
-        return [], []
+        logger.error(f"DynamoDB scan failed: {e}")
+        raise
 
-def download_file_from_s3(bucket_name, s3_key, local_path):
-    s3 = boto3.client('s3')
-    s3.download_file(bucket_name, s3_key, local_path)
+def handle_s3_file(bucket_name, s3_key, local_path, operation='download', region_name='us-east-1'):
+    """Generic S3 file handler for up/downloads"""
+    clients = get_aws_clients(region_name)
+    try:
+        if operation == 'download':
+            clients['s3'].download_file(bucket_name, s3_key, local_path)
+            logger.info(f"Downloaded {s3_key} to {local_path}")
+        elif operation == 'upload':
+            clients['s3'].upload_file(local_path, bucket_name, s3_key)
+            logger.info(f"Uploaded {local_path} to {s3_key}")
+        else:
+            raise ValueError("Invalid operation - must be 'download' or 'upload'")
+        return True
+    except Exception as e:
+        logger.error(f"S3 {operation} failed: {e}")
+        raise
 
-def upload_file_to_s3(local_path, bucket_name, s3_key):
-    s3 = boto3.client('s3')
-    s3.upload_file(local_path, bucket_name, s3_key)
+def process_video_frame(frame, known_data, emotion_detector):
+    """Process a single frame for faces and emotions"""
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    face_locations = face_recognition.face_locations(rgb_frame)
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
-def process_video(s3_input_bucket, s3_input_key, s3_output_bucket=None, s3_output_key=None, dynamo_table="KnownFaces"):
-    local_input_path = "/tmp/input_video.mp4"
-    local_output_path = "/tmp/output_with_emotions.mp4"
+    for (top, right, bottom, left), encoding in zip(face_locations, face_encodings):
+        # Face recognition
+        name = "Unknown"
+        matches = face_recognition.compare_faces(known_data['encodings'], encoding, tolerance=0.6)
+        if True in matches:
+            best_match_idx = np.argmin(face_recognition.face_distance(known_data['encodings'], encoding))
+            name = known_data['names'][best_match_idx]
 
-    # Download input video from S3
-    download_file_from_s3(s3_input_bucket, s3_input_key, local_input_path)
-
-    known_names, known_encodings = load_known_faces_from_dynamodb(dynamo_table)
-    if not known_encodings:
-        raise RuntimeError("No known faces found in DynamoDB.")
-
-    emotion_detector = FER(mtcnn=True)
-    cap = cv2.VideoCapture(local_input_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video: {local_input_path}")
-
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(local_output_path, fourcc, fps, (width, height))
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_frame)
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-
-        for (top, right, bottom, left), encoding in zip(face_locations, face_encodings):
-            name = "Unknown"
-            matches = face_recognition.compare_faces(known_encodings, encoding, tolerance=0.6)
-            if True in matches:
-                best_match_index = np.argmin(face_recognition.face_distance(known_encodings, encoding))
-                name = known_names[best_match_index]
-
-            face_crop = frame[top:bottom, left:right]
+        # Emotion detection
+        face_crop = frame[top:bottom, left:right]
+        try:
             top_emotion, score = emotion_detector.top_emotion(face_crop)
             emotion_label = f"{top_emotion} ({score:.2f})" if top_emotion else "Neutral"
+        except Exception as e:
+            logger.warning(f"Emotion detection failed: {e}")
+            emotion_label = "Neutral"
 
-            color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
-            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-            cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-            cv2.putText(frame, emotion_label, (left, bottom + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+        # Annotate frame
+        color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+        cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+        cv2.putText(frame, emotion_label, (left, bottom + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 
-        out.write(frame)
+    return frame
 
-    cap.release()
-    out.release()
-
-    # Upload result video to S3 if bucket and key are provided
-    if s3_output_bucket and s3_output_key:
-        upload_file_to_s3(local_output_path, s3_output_bucket, s3_output_key)
-
-    return local_output_path
+def process_video(
+    s3_input_bucket,
+    s3_input_key,
+    s3_output_bucket=None,
+    s3_output_key=None,
+    dynamo_table="KnownFaces",
+    region_name='us-east-1'
+):
+    """Main video processing pipeline with enhanced error handling"""
+    # File paths
+    local_input = f"/tmp/{os.path.basename(s3_input_key)}"
+    local_output = f"/tmp/processed_{os.path.basename(s3_input_key)}"
+    
+    try:
+        logger.info(f"Starting processing for {s3_input_bucket}/{s3_input_key}")
+        
+        # 1. Download video
+        handle_s3_file(s3_input_bucket, s3_input_key, local_input, 'download', region_name)
+        
+        # 2. Load known faces
+        known_data = load_known_faces_from_dynamodb(dynamo_table, region_name)
+        emotion_detector = FER(mtcnn=True)
+        
+        # 3. Process video
+        cap = cv2.VideoCapture(local_input)
+        if not cap.isOpened():
+            raise RuntimeError(f"Failed to open video: {local_input}")
+        
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(local_output, fourcc, fps, (width, height))
+        
+        frame_count = 0
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            processed_frame = process_video_frame(frame, known_data, emotion_detector)
+            out.write(processed_frame)
+            frame_count += 1
+            
+            if frame_count % 100 == 0:
+                logger.info(f"Processed {frame_count} frames")
+        
+        cap.release()
+        out.release()
+        logger.info(f"Finished processing {frame_count} frames")
+        
+        # 4. Upload result
+        if s3_output_bucket and s3_output_key:
+            handle_s3_file(s3_output_bucket, s3_output_key, local_output, 'upload', region_name)
+        
+        return {
+            'status': 'success',
+            'processed_frames': frame_count,
+            'output_path': local_output,
+            's3_output_path': f"s3://{s3_output_bucket}/{s3_output_key}" if s3_output_bucket else None
+        }
+        
+    except Exception as e:
+        logger.error(f"Video processing failed: {e}")
+        return {
+            'status': 'error',
+            'error': str(e),
+            'processed_frames': frame_count if 'frame_count' in locals() else 0
+        }
+    finally:
+        # Cleanup
+        for f in [local_input, local_output]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception as e:
+                    logger.warning(f"Could not delete {f}: {e}")
