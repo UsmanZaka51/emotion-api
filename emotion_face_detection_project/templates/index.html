@@ -3,255 +3,328 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Emotion Face Detection</title>
+    <title>Face & Emotion Analyzer</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
-        .section { margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="file"], select { 
-            width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; 
-            border-radius: 4px; box-sizing: border-box;
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
         }
-        button { 
-            background: #4CAF50; color: white; border: none; padding: 12px 20px; 
-            cursor: pointer; border-radius: 4px; font-size: 16px;
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #2c3e50;
         }
-        button:hover { background: #45a049; }
-        #results { margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 4px; }
-        #preview { max-width: 300px; max-height: 300px; margin-top: 10px; display: none; }
-        .video-container { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }
-        .video-card { width: 200px; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
-        .video-card img { width: 100%; height: 120px; object-fit: cover; }
-        .progress-bar { width: 100%; background-color: #f1f1f1; border-radius: 4px; margin-top: 10px; }
-        .progress { height: 20px; border-radius: 4px; background-color: #4CAF50; width: 0%; }
+        .section {
+            background: #f8f9fa;
+            padding: 25px;
+            margin: 25px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-top: 0;
+            color: #3498db;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        input[type="text"], 
+        input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        .preview-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+        #imagePreview, #videoPreview {
+            max-width: 100%;
+            max-height: 300px;
+            display: none;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        #videoPreview {
+            width: 100%;
+            background: #000;
+        }
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .processing {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        .tab-container {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background: #eee;
+            border: none;
+            flex: 1;
+            text-align: center;
+        }
+        .tab.active {
+            background: #3498db;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
-    <h1>Emotion Face Detection System</h1>
-
-    <div class="section">
-        <h2>Upload Files</h2>
-        <form id="uploadForm">
-            <div class="form-group">
-                <label for="person_id">Person ID (for photos):</label>
-                <input type="text" id="person_id" name="person_id" placeholder="Enter person identifier">
-            </div>
-            <div class="form-group">
-                <label for="file">Select File (Photo or Video):</label>
-                <input type="file" id="file" name="file" accept="image/*,video/*" required>
-                <div id="filePreview">
-                    <img id="preview" src="#" alt="Preview">
-                    <video id="videoPreview" controls style="display:none; max-width: 300px;"></video>
-                </div>
-            </div>
-            <button type="submit">Upload File</button>
-        </form>
-        <div id="uploadResults"></div>
+    <h1>Face & Emotion Analyzer</h1>
+    
+    <div class="tab-container">
+        <button class="tab active" onclick="openTab('register')">Register Faces</button>
+        <button class="tab" onclick="openTab('process')">Process Video</button>
     </div>
 
-    <div class="section">
-        <h2>Process Video for Emotion Detection</h2>
-        <form id="processForm">
-            <div class="form-group">
-                <label for="videoSelect">Select Video to Process:</label>
-                <select id="videoSelect" name="video_s3_key" required>
-                    <option value="">Loading videos...</option>
-                </select>
-            </div>
-            <button type="submit">Process Video</button>
-        </form>
-        <div id="processResults"></div>
-        <div class="progress-bar" id="progressContainer" style="display:none;">
-            <div class="progress" id="progressBar"></div>
+    <div id="register" class="tab-content active">
+        <div class="section">
+            <h2>Add New User</h2>
+            <form id="addUserForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="Enter unique username" required>
+                </div>
+                <div class="form-group">
+                    <label for="faceImage">Face Image</label>
+                    <input type="file" id="faceImage" accept="image/*" required>
+                </div>
+                <div class="preview-container">
+                    <img id="imagePreview" alt="Face preview">
+                </div>
+                <button type="submit">Register Face</button>
+            </form>
+            <div id="registerStatus" class="status"></div>
         </div>
     </div>
 
-    <div class="section">
-        <h2>Available Videos</h2>
-        <button id="refreshVideos">Refresh List</button>
-        <div class="video-container" id="videoList"></div>
+    <div id="process" class="tab-content">
+        <div class="section">
+            <h2>Process Video</h2>
+            <form id="processVideoForm">
+                <div class="form-group">
+                    <label for="videoFile">Video File</label>
+                    <input type="file" id="videoFile" accept="video/*" required>
+                </div>
+                <div class="preview-container">
+                    <video id="videoPreview" controls></video>
+                </div>
+                <button type="submit">Analyze Emotions</button>
+            </form>
+            <div id="processStatus" class="status"></div>
+            <div id="resultContainer" style="display: none;">
+                <h3>Processing Result</h3>
+                <div id="resultPreview" class="preview-container"></div>
+                <a id="downloadLink" href="#" target="_blank" style="display: none;">
+                    <button>Download Processed Video</button>
+                </a>
+            </div>
+        </div>
     </div>
 
     <script>
-        // File preview
-        document.getElementById('file').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const preview = document.getElementById('preview');
-            const videoPreview = document.getElementById('videoPreview');
+        // Tab functionality
+        function openTab(tabName) {
+            const tabs = document.getElementsByClassName('tab');
+            const tabContents = document.getElementsByClassName('tab-content');
             
-            preview.style.display = 'none';
-            videoPreview.style.display = 'none';
-
-            if (file.type.startsWith('image/')) {
-                preview.src = URL.createObjectURL(file);
-                preview.style.display = 'block';
-            } else if (file.type.startsWith('video/')) {
-                videoPreview.src = URL.createObjectURL(file);
-                videoPreview.style.display = 'block';
+            for (let tab of tabs) {
+                tab.classList.remove('active');
             }
-        });
-
-        // Handle file upload
-        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
             
-            const formData = new FormData();
-            formData.append('person_id', document.getElementById('person_id').value);
-            formData.append('file', document.getElementById('file').files[0]);
-
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const result = await response.json();
-                const resultsDiv = document.getElementById('uploadResults');
-                
-                if (response.ok) {
-                    resultsDiv.innerHTML = `
-                        <div style="color: green;">
-                            <p><strong>Success:</strong> ${result.message}</p>
-                            <p><strong>S3 Path:</strong> ${result.s3_path}</p>
-                            <p><strong>File Type:</strong> ${result.file_type}</p>
-                        </div>
-                    `;
-                    // Refresh video list after upload
-                    loadVideos();
-                } else {
-                    resultsDiv.innerHTML = `
-                        <div style="color: red;">
-                            <p><strong>Error:</strong> ${result.error}</p>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById('uploadResults').innerHTML = `
-                    <div style="color: red;">
-                        <p><strong>Error:</strong> ${error.message}</p>
-                    </div>
-                `;
+            for (let content of tabContents) {
+                content.classList.remove('active');
             }
-        });
-
-        // Load videos for processing
-        async function loadVideos() {
-            try {
-                const response = await fetch('/videos');
-                const data = await response.json();
-                
-                if (response.ok) {
-                    const videoSelect = document.getElementById('videoSelect');
-                    const videoList = document.getElementById('videoList');
-                    
-                    // Update dropdown
-                    videoSelect.innerHTML = data.videos.length > 0 
-                        ? data.videos.map(video => 
-                            `<option value="${video.s3_key}">${video.s3_key.split('/').pop()}</option>`
-                          ).join('')
-                        : '<option value="">No videos available</option>';
-                    
-                    // Update video list display
-                    videoList.innerHTML = data.videos.map(video => `
-                        <div class="video-card">
-                            <h3>${video.s3_key.split('/').pop()}</h3>
-                            <p><strong>Person ID:</strong> ${video.person_id || 'N/A'}</p>
-                            <p><strong>Uploaded:</strong> ${new Date(video.upload_time).toLocaleString()}</p>
-                            <video width="100%" controls>
-                                <source src="https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/${video.s3_key}" type="video/mp4">
-                                Your browser does not support the video tag.
-                            </video>
-                        </div>
-                    `).join('');
-                } else {
-                    console.error('Error loading videos:', data.error);
-                }
-            } catch (error) {
-                console.error('Error loading videos:', error);
-            }
+            
+            document.getElementById(tabName).classList.add('active');
+            event.currentTarget.classList.add('active');
         }
 
-        // Process video
-        document.getElementById('processForm').addEventListener('submit', async function(e) {
+        // Image preview for registration
+        document.getElementById('faceImage').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const preview = document.getElementById('imagePreview');
+            
+            if (file) {
+                preview.src = URL.createObjectURL(file);
+                preview.style.display = 'block';
+            } else {
+                preview.style.display = 'none';
+            }
+        });
+
+        // Video preview for processing
+        document.getElementById('videoFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const preview = document.getElementById('videoPreview');
+            
+            if (file) {
+                preview.src = URL.createObjectURL(file);
+                preview.style.display = 'block';
+            } else {
+                preview.style.display = 'none';
+            }
+        });
+
+        // Register face form submission
+        document.getElementById('addUserForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const videoSelect = document.getElementById('videoSelect');
-            const resultsDiv = document.getElementById('processResults');
-            const progressContainer = document.getElementById('progressContainer');
-            const progressBar = document.getElementById('progressBar');
+            const username = document.getElementById('username').value;
+            const imageFile = document.getElementById('faceImage').files[0];
+            const status = document.getElementById('registerStatus');
             
-            if (!videoSelect.value) {
-                resultsDiv.innerHTML = '<div style="color: red;">Please select a video</div>';
+            if (!imageFile) {
+                showStatus('Please select a face image', 'error', status);
                 return;
             }
 
-            try {
-                resultsDiv.innerHTML = '<div>Processing video...</div>';
-                progressContainer.style.display = 'block';
-                progressBar.style.width = '0%';
-                
-                // Simulate progress (in real app, use WebSocket or polling)
-                const interval = setInterval(() => {
-                    const width = parseInt(progressBar.style.width) || 0;
-                    if (width < 90) {
-                        progressBar.style.width = (width + 10) + '%';
-                    }
-                }, 1000);
-                
-                const response = await fetch('/process-video', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: `video_s3_key=${encodeURIComponent(videoSelect.value)}`
-                });
+            const formData = new FormData();
+            formData.append('person_id', username);
+            formData.append('face_image', imageFile);
 
-                clearInterval(interval);
-                progressBar.style.width = '100%';
+            try {
+                status.textContent = 'Registering face...';
+                status.className = 'status processing';
+                status.style.display = 'block';
+                
+                const response = await fetch('/admin/add-face', {
+                    method: 'POST',
+                    body: formData
+                });
                 
                 const result = await response.json();
                 
                 if (response.ok) {
-                    resultsDiv.innerHTML = `
-                        <div style="color: green;">
-                            <p><strong>Success:</strong> ${result.message}</p>
-                            <p><strong>Output Path:</strong> ${result.output_path}</p>
-                            <p>Processing complete!</p>
-                        </div>
-                    `;
+                    showStatus(`Successfully registered ${username}`, 'success', status);
+                    document.getElementById('addUserForm').reset();
+                    document.getElementById('imagePreview').style.display = 'none';
                 } else {
-                    resultsDiv.innerHTML = `
-                        <div style="color: red;">
-                            <p><strong>Error:</strong> ${result.error}</p>
-                        </div>
-                    `;
+                    showStatus(`Error: ${result.error}`, 'error', status);
                 }
             } catch (error) {
-                resultsDiv.innerHTML = `
-                    <div style="color: red;">
-                        <p><strong>Error:</strong> ${error.message}</p>
-                    </div>
-                `;
+                showStatus(`Network error: ${error.message}`, 'error', status);
             }
         });
 
-        // Refresh videos button
-        document.getElementById('refreshVideos').addEventListener('click', function(e) {
+        // Process video form submission
+        document.getElementById('processVideoForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            loadVideos();
+            
+            const videoFile = document.getElementById('videoFile').files[0];
+            const status = document.getElementById('processStatus');
+            const resultContainer = document.getElementById('resultContainer');
+            const downloadLink = document.getElementById('downloadLink');
+            
+            if (!videoFile) {
+                showStatus('Please select a video file', 'error', status);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video_file', videoFile);
+
+            try {
+                status.textContent = 'Processing video... (this may take several minutes)';
+                status.className = 'status processing';
+                status.style.display = 'block';
+                resultContainer.style.display = 'none';
+                
+                const response = await fetch('/process-video', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showStatus('Video processing complete!', 'success', status);
+                    resultContainer.style.display = 'block';
+                    
+                    // Display result (modify based on your API response)
+                    if (result.output_url) {
+                        const preview = document.getElementById('resultPreview');
+                        preview.innerHTML = `
+                            <video controls style="max-width:100%">
+                                <source src="${result.output_url}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                        `;
+                        downloadLink.href = result.output_url;
+                        downloadLink.style.display = 'block';
+                    }
+                } else {
+                    showStatus(`Error: ${result.error}`, 'error', status);
+                }
+            } catch (error) {
+                showStatus(`Network error: ${error.message}`, 'error', status);
+            }
         });
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            loadVideos();
-        });
-
-        // Constants (should match your backend)
-        const S3_BUCKET = 'my-emotion-model-bucket';
-        const AWS_REGION = 'us-east-1';
+        function showStatus(message, type, element) {
+            element.textContent = message;
+            element.className = `status ${type}`;
+            element.style.display = 'block';
+            
+            if (type !== 'processing') {
+                setTimeout(() => {
+                    element.style.display = 'none';
+                }, 5000);
+            }
+        }
     </script>
 </body>
 </html>
